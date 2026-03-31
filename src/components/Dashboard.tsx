@@ -435,30 +435,28 @@ export default function Dashboard({ onLogout, mockUser }: DashboardProps) {
 
   // Fetch all courses for real-time status and unique subjects/lecturers
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const coursesRef = collection(db, 'courses');
-        const snapshot = await getDocs(coursesRef);
-        const subjects = new Set<string>();
-        const lecturers = new Set<string>();
-        const courses: Course[] = [];
-        
-        snapshot.docs.forEach(doc => {
-          const data = doc.data() as Course;
-          const course = { id: doc.id, ...data };
-          courses.push(course);
-          if (data.subjectName) subjects.add(data.subjectName);
-          if (data.lecturer) lecturers.add(data.lecturer);
-        });
-        
-        setAllCourses(courses);
-        setAllSubjects(Array.from(subjects).sort());
-        setAllLecturers(Array.from(lecturers).sort());
-      } catch (error) {
-        console.error('Error fetching data:', error);
-      }
-    };
-    fetchData();
+    const coursesRef = collection(db, 'courses');
+    const unsubscribe = onSnapshot(coursesRef, (snapshot) => {
+      const subjects = new Set<string>();
+      const lecturers = new Set<string>();
+      const courses: Course[] = [];
+
+      snapshot.docs.forEach(doc => {
+        const data = doc.data() as Course;
+        const course = { id: doc.id, ...data };
+        courses.push(course);
+        if (data.subjectName) subjects.add(data.subjectName);
+        if (data.lecturer) lecturers.add(data.lecturer);
+      });
+
+      setAllCourses(courses);
+      setAllSubjects(Array.from(subjects).sort());
+      setAllLecturers(Array.from(lecturers).sort());
+    }, (error) => {
+      console.error('Error fetching data:', error);
+    });
+
+    return () => unsubscribe();
   }, []);
 
   // Reset logic when switching tabs
@@ -862,6 +860,7 @@ export default function Dashboard({ onLogout, mockUser }: DashboardProps) {
         unit: BORROWING_UNITS[0]
       });
     } catch (error) {
+      alert('Không thể đăng ký mượn phòng. Có thể do lỗi phân quyền.');
       handleFirestoreError(error, OperationType.WRITE, 'roomBookings');
     } finally {
       setIsSubmittingBooking(false);
@@ -899,11 +898,8 @@ export default function Dashboard({ onLogout, mockUser }: DashboardProps) {
         room: '', building: '', subjectName: '', subjectCode: '', classCode: '',
         periods: '', timeRange: '', dayOfWeek: 'Thứ 2', startDate: getHanoiDate(), endDate: getHanoiDate(), lecturer: ''
       });
-      // Optionally re-fetch courses here, but we rely on the realtime listener or general state
-      // Actually, allCourses is fetched once on mount. Let's force a window reload or better, just re-fetch.
-      // For simplicity in this mock, we'll reload or let the user refresh.
-      window.location.reload();
     } catch (error) {
+      alert('Không thể lưu lịch học. Có thể do lỗi phân quyền (Missing or insufficient permissions).');
       handleFirestoreError(error, OperationType.WRITE, 'courses');
     } finally {
       setIsSubmittingCourse(false);
@@ -934,7 +930,6 @@ export default function Dashboard({ onLogout, mockUser }: DashboardProps) {
       const courseRef = doc(db, 'courses', courseId);
       await deleteDoc(courseRef);
       alert('Đã xóa lịch học thành công.');
-      window.location.reload();
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'courses');
     }
