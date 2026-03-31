@@ -21,10 +21,11 @@ import {
   BookOpen,
   UserCheck,
   Clock3,
-  AlertTriangle
+  AlertTriangle,
+  Lock
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType, auth } from '../firebase';
-import { collection, query, where, getDocs, addDoc, doc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, doc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { MockUser } from '../data/mockUsers';
 
 interface DashboardProps {
@@ -72,30 +73,68 @@ const BORROWING_UNITS = [
   "CLB Âm nhạc Cổ điển Đại học Kinh tế Quốc Dân - NEU Philharmonic"
 ];
 
-const navGroups = [
-  {
-    title: "TRANG CHỦ",
-    items: [
-      { id: 'trang-chu', label: 'Trang chủ', icon: Home },
-    ]
-  },
-  {
-    title: "TRA CỨU GIẢNG ĐƯỜNG - TKB",
-    items: [
-      { id: 'tra-cuu-gd', label: 'Tra cứu giảng đường', icon: Search },
-      { id: 'tra-cuu-tkb', label: 'Tra cứu thời khóa biểu', icon: Calendar },
-      { id: 'tra-cuu-tkb-gv', label: 'Tra cứu TKB giảng viên', icon: User },
-    ]
-  },
-  {
-    title: "CHỨC NĂNG TRỰC TUYẾN",
-    items: [
-      { id: 'muon-phong', label: 'Mượn phòng', icon: ClipboardList },
-      { id: 'xin-giay-xn', label: 'Xin giấy xác nhận', icon: FileText },
-      { id: 'phan-anh', label: 'Phản ánh sự cố', icon: AlertTriangle },
-    ]
+const getNavGroups = (role?: string) => {
+  if (role === 'qldt') {
+    return [
+      {
+        title: "TRANG CHỦ",
+        items: [
+          { id: 'trang-chu', label: 'Trang chủ', icon: Home },
+        ]
+      },
+      {
+        title: "QUẢN LÝ ĐÀO TẠO",
+        items: [
+          { id: 'quan-ly-lich-hoc', label: 'Quản lý lịch học', icon: Calendar },
+          { id: 'duyet-muon-phong', label: 'Duyệt mượn phòng', icon: ClipboardList },
+        ]
+      }
+    ];
   }
-];
+
+  if (role === 'qlcsvc') {
+    return [
+      {
+        title: "TRANG CHỦ",
+        items: [
+          { id: 'trang-chu', label: 'Trang chủ', icon: Home },
+        ]
+      },
+      {
+        title: "QUẢN LÝ CƠ SỞ VẬT CHẤT",
+        items: [
+          { id: 'quan-ly-su-co', label: 'Quản lý sự cố', icon: AlertTriangle },
+          { id: 'quan-ly-bao-tri', label: 'Bảo trì & CSVC', icon: Building2 },
+        ]
+      }
+    ];
+  }
+
+  return [
+    {
+      title: "TRANG CHỦ",
+      items: [
+        { id: 'trang-chu', label: 'Trang chủ', icon: Home },
+      ]
+    },
+    {
+      title: "TRA CỨU GIẢNG ĐƯỜNG - TKB",
+      items: [
+        { id: 'tra-cuu-gd', label: 'Tra cứu giảng đường', icon: Search },
+        { id: 'tra-cuu-tkb', label: 'Tra cứu thời khóa biểu', icon: Calendar },
+        { id: 'tra-cuu-tkb-gv', label: 'Tra cứu TKB giảng viên', icon: User },
+      ]
+    },
+    {
+      title: "CHỨC NĂNG TRỰC TUYẾN",
+      items: [
+        { id: 'muon-phong', label: 'Mượn phòng', icon: ClipboardList },
+        { id: 'xin-giay-xn', label: 'Xin giấy xác nhận', icon: FileText },
+        { id: 'phan-anh', label: 'Phản ánh sự cố', icon: AlertTriangle },
+      ]
+    }
+  ];
+};
 
 interface SidebarContentProps {
   activeTab: string;
@@ -137,7 +176,7 @@ const SidebarContent = memo(({ activeTab, setActiveTab, setIsMobileMenuOpen, onL
 
     {/* Navigation Section */}
     <nav className="flex-1 overflow-y-auto p-4 space-y-8 custom-scrollbar">
-      {navGroups.map((group, idx) => (
+      {getNavGroups(mockUser?.role).map((group, idx) => (
         <div key={idx}>
           <h3 className="px-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4">
             {group.title}
@@ -274,6 +313,42 @@ export default function Dashboard({ onLogout, mockUser }: DashboardProps) {
   const [allCourses, setAllCourses] = useState<Course[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
 
+  // QLDT Course Management States
+  const [qldtCourseSubTab, setQldtCourseSubTab] = useState<'list' | 'add'>('list');
+  const [isSubmittingCourse, setIsSubmittingCourse] = useState(false);
+  const [courseForm, setCourseForm] = useState<Omit<Course, 'id'>>({
+    room: '',
+    building: '',
+    subjectName: '',
+    subjectCode: '',
+    classCode: '',
+    periods: '',
+    timeRange: '',
+    dayOfWeek: 'Thứ 2',
+    startDate: getHanoiDate(),
+    endDate: getHanoiDate(),
+    lecturer: ''
+  });
+  const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
+
+  // QLDT Room Bookings States
+  const [allBookings, setAllBookings] = useState<any[]>([]);
+
+  // QLCSVC Incident Management & Maintenance States
+  const [allIncidents, setAllIncidents] = useState<any[]>([]);
+  const [allMaintenanceTickets, setAllMaintenanceTickets] = useState<any[]>([]);
+  const [maintenanceSubTab, setMaintenanceSubTab] = useState<'list' | 'add'>('list');
+  const [isSubmittingMaintenance, setIsSubmittingMaintenance] = useState(false);
+  const [maintenanceForm, setMaintenanceForm] = useState({
+    title: '',
+    description: '',
+    building: '',
+    room: '',
+    khoa_phong: false,
+    startDate: getHanoiDate(),
+    endDate: getHanoiDate()
+  });
+
   // Incident States
   const [incidentSubTab, setIncidentSubTab] = useState<'report' | 'list'>('report');
   const [incidentForm, setIncidentForm] = useState({
@@ -398,9 +473,14 @@ export default function Dashboard({ onLogout, mockUser }: DashboardProps) {
   }, [activeTab, prevTab]);
 
   const getRoomStatus = (building: string, room: string) => {
-    // Mock maintenance rooms for demonstration
-    const maintenanceRooms = ['A2-103', 'D-102'];
-    if (maintenanceRooms.includes(room)) return { status: 'maintenance', label: 'Bảo trì', color: 'bg-gray-100 border-gray-200 text-gray-400' };
+    // Check if room is under maintenance and locked
+    const isMaintenance = allMaintenanceTickets.some(ticket =>
+      ticket.building === building &&
+      ticket.room === room &&
+      ticket.status !== 'resolved' &&
+      ticket.khoa_phong === true
+    );
+    if (isMaintenance) return { status: 'maintenance', label: 'Bảo trì', color: 'bg-gray-100 border-gray-200 text-gray-400' };
 
     const now = currentTime;
     const hanoiTime = new Intl.DateTimeFormat('en-CA', {
@@ -575,7 +655,7 @@ export default function Dashboard({ onLogout, mockUser }: DashboardProps) {
     setIsLoadingBookings(true);
     const bookingsRef = collection(db, 'roomBookings');
     const qBookings = query(bookingsRef, where('userId', '==', auth.currentUser.uid));
-    const unsubscribeBookings = onSnapshot(qBookings, (snapshot) => {
+    const unsubscribeMyBookings = onSnapshot(qBookings, (snapshot) => {
       const bookings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setMyBookings(bookings.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
       setIsLoadingBookings(false);
@@ -584,10 +664,17 @@ export default function Dashboard({ onLogout, mockUser }: DashboardProps) {
       setIsLoadingBookings(false);
     });
 
+    const unsubscribeAllBookings = onSnapshot(bookingsRef, (snapshot) => {
+      const bookings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setAllBookings(bookings.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'roomBookings');
+    });
+
     setIsLoadingIncidents(true);
     const incidentsRef = collection(db, 'incidents');
     const qIncidents = query(incidentsRef, where('userId', '==', auth.currentUser.uid));
-    const unsubscribeIncidents = onSnapshot(qIncidents, (snapshot) => {
+    const unsubscribeMyIncidents = onSnapshot(qIncidents, (snapshot) => {
       const incidents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setMyIncidents(incidents.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
       setIsLoadingIncidents(false);
@@ -596,11 +683,120 @@ export default function Dashboard({ onLogout, mockUser }: DashboardProps) {
       setIsLoadingIncidents(false);
     });
 
+    const unsubscribeAllIncidents = onSnapshot(incidentsRef, (snapshot) => {
+      const incidents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setAllIncidents(incidents.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'incidents');
+    });
+
+    const maintenanceRef = collection(db, 'maintenanceTickets');
+    const unsubscribeMaintenance = onSnapshot(maintenanceRef, (snapshot) => {
+      const tickets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setAllMaintenanceTickets(tickets.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'maintenanceTickets');
+    });
+
     return () => {
-      unsubscribeBookings();
-      unsubscribeIncidents();
+      unsubscribeMyBookings();
+      unsubscribeAllBookings();
+      unsubscribeMyIncidents();
+      unsubscribeAllIncidents();
+      unsubscribeMaintenance();
     };
   }, [auth.currentUser]);
+
+  const handleMaintenanceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!auth.currentUser) return;
+    setIsSubmittingMaintenance(true);
+    try {
+      const maintenanceRef = collection(db, 'maintenanceTickets');
+      const newTicket = {
+        ...maintenanceForm,
+        userId: auth.currentUser.uid,
+        userName: mockUser?.displayName || auth.currentUser.displayName || 'Vũ Trí Quang Vinh',
+        status: 'in-progress',
+        createdAt: new Date().toISOString()
+      };
+      await addDoc(maintenanceRef, newTicket);
+      alert('Tạo phiếu bảo trì thành công!');
+      setMaintenanceSubTab('list');
+      setMaintenanceForm({
+        title: '', description: '', building: '', room: '', khoa_phong: false, startDate: getHanoiDate(), endDate: getHanoiDate()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'maintenanceTickets');
+    } finally {
+      setIsSubmittingMaintenance(false);
+    }
+  };
+
+  const handleUpdateMaintenanceStatus = async (ticketId: string, status: 'resolved') => {
+    try {
+      const ticketRef = doc(db, 'maintenanceTickets', ticketId);
+      // Automatically unlock the room if it's resolved
+      await updateDoc(ticketRef, { status, khoa_phong: false });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'maintenanceTickets');
+    }
+  };
+
+  const handleUpdateIncidentStatus = async (incidentId: string, status: 'received' | 'in-progress' | 'resolved' | 'rejected') => {
+    try {
+      const incidentRef = doc(db, 'incidents', incidentId);
+      await updateDoc(incidentRef, { status });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'incidents');
+    }
+  };
+
+  const handleUpdateBookingStatus = async (bookingId: string, status: 'approved' | 'rejected') => {
+    try {
+      const bookingRef = doc(db, 'roomBookings', bookingId);
+      await updateDoc(bookingRef, { status });
+      alert(`Đã ${status === 'approved' ? 'phê duyệt' : 'từ chối'} yêu cầu mượn phòng.`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'roomBookings');
+    }
+  };
+
+  const checkTimeOverlap = (building: string, room: string, startDate: string, startTime: string, endDate: string, endTime: string) => {
+    // Basic day conversion from start date
+    // (A full implementation would check each day in the range, but we assume single-day booking for simplicity here,
+    // or at least that we need to check if the day of week matches the course day of week)
+    const borrowStart = new Date(`${startDate}T${startTime}`);
+    const borrowEnd = new Date(`${endDate}T${endTime}`);
+
+    // Create an array of days within the booking period
+    const bookingDays = getDaysInDateRange(startDate, endDate);
+
+    for (const course of allCourses) {
+      if (course.building !== building || course.room !== room) continue;
+
+      // Check if course duration overlaps with booking duration
+      const courseStartDate = course.startDate;
+      const courseEndDate = course.endDate;
+      if (endDate < courseStartDate || startDate > courseEndDate) continue;
+
+      // Check if course day of week falls within the booking days
+      if (!bookingDays.includes(course.dayOfWeek)) continue;
+
+      // Check time overlap
+      const [courseStartTime, courseEndTime] = course.timeRange.split(' - ');
+
+      // Simple string comparison works for HH:mm format
+      if (
+        (startTime >= courseStartTime && startTime < courseEndTime) ||
+        (endTime > courseStartTime && endTime <= courseEndTime) ||
+        (startTime <= courseStartTime && endTime >= courseEndTime)
+      ) {
+        return course; // Conflict found
+      }
+    }
+    return null; // No conflict
+  };
 
   const handleBookingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -611,6 +807,21 @@ export default function Dashboard({ onLogout, mockUser }: DashboardProps) {
 
     if (endDateTime < startDateTime) {
       alert('Ngày và thời gian kết thúc phải sau hoặc bằng ngày và thời gian mượn.');
+      return;
+    }
+
+    // Check for overlap with existing courses
+    const conflictingCourse = checkTimeOverlap(
+      bookingForm.building,
+      bookingForm.room,
+      bookingForm.borrowDate,
+      bookingForm.startTime,
+      bookingForm.returnDate,
+      bookingForm.endTime
+    );
+
+    if (conflictingCourse) {
+      alert(`Không thể mượn phòng! Phòng ${bookingForm.room} đang có lớp học (${conflictingCourse.subjectName}) từ ${conflictingCourse.timeRange} vào ${conflictingCourse.dayOfWeek}. Vui lòng chọn thời gian hoặc phòng khác.`);
       return;
     }
 
@@ -655,6 +866,66 @@ export default function Dashboard({ onLogout, mockUser }: DashboardProps) {
       alert('Đã hủy yêu cầu thành công.');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'roomBookings');
+    }
+  };
+
+  const handleCourseSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmittingCourse(true);
+    try {
+      if (editingCourseId) {
+        const courseRef = doc(db, 'courses', editingCourseId);
+        await updateDoc(courseRef, courseForm as any);
+        alert('Cập nhật lịch học thành công!');
+      } else {
+        const coursesRef = collection(db, 'courses');
+        await addDoc(coursesRef, courseForm);
+        alert('Thêm lịch học thành công!');
+      }
+      setQldtCourseSubTab('list');
+      setEditingCourseId(null);
+      setCourseForm({
+        room: '', building: '', subjectName: '', subjectCode: '', classCode: '',
+        periods: '', timeRange: '', dayOfWeek: 'Thứ 2', startDate: getHanoiDate(), endDate: getHanoiDate(), lecturer: ''
+      });
+      // Optionally re-fetch courses here, but we rely on the realtime listener or general state
+      // Actually, allCourses is fetched once on mount. Let's force a window reload or better, just re-fetch.
+      // For simplicity in this mock, we'll reload or let the user refresh.
+      window.location.reload();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'courses');
+    } finally {
+      setIsSubmittingCourse(false);
+    }
+  };
+
+  const handleEditCourse = (course: Course) => {
+    setCourseForm({
+      room: course.room,
+      building: course.building,
+      subjectName: course.subjectName,
+      subjectCode: course.subjectCode,
+      classCode: course.classCode,
+      periods: course.periods,
+      timeRange: course.timeRange,
+      dayOfWeek: course.dayOfWeek,
+      startDate: course.startDate,
+      endDate: course.endDate,
+      lecturer: course.lecturer
+    });
+    setEditingCourseId(course.id);
+    setQldtCourseSubTab('add');
+  };
+
+  const handleDeleteCourse = async (courseId: string) => {
+    if (!window.confirm('Bạn có chắc chắn muốn xóa lịch học này?')) return;
+    try {
+      const courseRef = doc(db, 'courses', courseId);
+      await deleteDoc(courseRef);
+      alert('Đã xóa lịch học thành công.');
+      window.location.reload();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'courses');
     }
   };
 
@@ -839,7 +1110,7 @@ export default function Dashboard({ onLogout, mockUser }: DashboardProps) {
             </button>
             <div className="h-6 w-px bg-gray-200 hidden sm:block" />
             <h2 className="text-lg font-bold text-gray-800 hidden sm:block">
-              {navGroups.flatMap(g => g.items).find(i => i.id === activeTab)?.label || 'Hệ thống Quản lý'}
+              {getNavGroups(mockUser?.role).flatMap(g => g.items).find(i => i.id === activeTab)?.label || 'Hệ thống Quản lý'}
             </h2>
           </div>
 
@@ -908,15 +1179,535 @@ export default function Dashboard({ onLogout, mockUser }: DashboardProps) {
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar">
           <div className="max-w-7xl mx-auto">
-            {(mockUser?.role === 'qldt' || mockUser?.role === 'qlcsvc') ? (
-              <div className="flex flex-col items-center justify-center h-[60vh] text-center">
-                <div className="w-24 h-24 bg-red-50 rounded-full flex items-center justify-center mb-6">
-                  <Info className="w-12 h-12 text-[#8b0000]" />
+            {activeTab === 'quan-ly-lich-hoc' ? (
+              <div className="space-y-8">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                      <Calendar className="text-[#8b0000]" />
+                      Quản lý Lịch học
+                    </h2>
+                    <p className="text-gray-500 mt-1">Xem, thêm, sửa, xóa thông tin thời khóa biểu và lịch giảng dạy.</p>
+                  </div>
                 </div>
-                <h2 className="text-2xl font-bold text-gray-800 mb-2">Giao diện đang được phát triển</h2>
-                <p className="text-gray-500 max-w-md">
-                  Giao diện dành cho nhân viên phòng {mockUser.role === 'qldt' ? 'Quản lý đào tạo' : 'Quản lý Cơ sở vật chất'} hiện tại chưa được hiển thị. Vui lòng quay lại sau.
-                </p>
+
+                {/* Sub-tabs */}
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => {
+                      setQldtCourseSubTab('list');
+                      setEditingCourseId(null);
+                      setCourseForm({
+                        room: '', building: '', subjectName: '', subjectCode: '', classCode: '',
+                        periods: '', timeRange: '', dayOfWeek: 'Thứ 2', startDate: getHanoiDate(), endDate: getHanoiDate(), lecturer: ''
+                      });
+                    }}
+                    className={`px-6 py-2 rounded-full font-bold text-sm transition-all ${qldtCourseSubTab === 'list' ? 'bg-[#8b0000] text-white shadow-lg shadow-red-900/10' : 'bg-white text-gray-500 border border-gray-100 hover:bg-gray-50'}`}
+                  >
+                    Danh sách Lịch học
+                  </button>
+                  <button
+                    onClick={() => setQldtCourseSubTab('add')}
+                    className={`px-6 py-2 rounded-full font-bold text-sm transition-all ${qldtCourseSubTab === 'add' ? 'bg-[#8b0000] text-white shadow-lg shadow-red-900/10' : 'bg-white text-gray-500 border border-gray-100 hover:bg-gray-50'}`}
+                  >
+                    {editingCourseId ? 'Sửa Lịch học' : 'Thêm Lịch học'}
+                  </button>
+                </div>
+
+                {qldtCourseSubTab === 'add' ? (
+                  <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-8">
+                    <form onSubmit={handleCourseSubmit} className="space-y-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {/* Tên môn học */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase ml-1">Tên môn học</label>
+                          <input type="text" required value={courseForm.subjectName} onChange={e => setCourseForm({...courseForm, subjectName: e.target.value})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#8b0000] outline-none text-sm" />
+                        </div>
+                        {/* Mã môn học */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase ml-1">Mã môn học</label>
+                          <input type="text" required value={courseForm.subjectCode} onChange={e => setCourseForm({...courseForm, subjectCode: e.target.value})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#8b0000] outline-none text-sm" />
+                        </div>
+                        {/* Lớp học phần */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase ml-1">Mã Lớp học phần</label>
+                          <input type="text" required value={courseForm.classCode} onChange={e => setCourseForm({...courseForm, classCode: e.target.value})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#8b0000] outline-none text-sm" />
+                        </div>
+                        {/* Tòa nhà */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase ml-1">Tòa nhà</label>
+                          <select required value={courseForm.building} onChange={e => setCourseForm({...courseForm, building: e.target.value, room: ''})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#8b0000] outline-none text-sm">
+                            <option value="">-- Chọn tòa nhà --</option>
+                            {Object.keys(ROOM_DATA).map(b => <option key={b} value={b}>{b}</option>)}
+                          </select>
+                        </div>
+                        {/* Phòng học */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase ml-1">Phòng học</label>
+                          <select required value={courseForm.room} onChange={e => setCourseForm({...courseForm, room: e.target.value})} disabled={!courseForm.building} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#8b0000] outline-none text-sm disabled:opacity-50">
+                            <option value="">-- Chọn phòng --</option>
+                            {(ROOM_DATA[courseForm.building] || []).map(r => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                        </div>
+                        {/* Giảng viên */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase ml-1">Giảng viên</label>
+                          <input type="text" required value={courseForm.lecturer} onChange={e => setCourseForm({...courseForm, lecturer: e.target.value})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#8b0000] outline-none text-sm" />
+                        </div>
+                        {/* Thứ */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase ml-1">Thứ</label>
+                          <select required value={courseForm.dayOfWeek} onChange={e => setCourseForm({...courseForm, dayOfWeek: e.target.value})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#8b0000] outline-none text-sm">
+                            {['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chủ Nhật'].map(d => <option key={d} value={d}>{d}</option>)}
+                          </select>
+                        </div>
+                        {/* Tiết */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase ml-1">Tiết học</label>
+                          <input type="text" required placeholder="VD: 1,2,3" value={courseForm.periods} onChange={e => setCourseForm({...courseForm, periods: e.target.value})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#8b0000] outline-none text-sm" />
+                        </div>
+                        {/* Thời gian */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase ml-1">Khung giờ</label>
+                          <input type="text" required placeholder="VD: 07:00 - 09:30" value={courseForm.timeRange} onChange={e => setCourseForm({...courseForm, timeRange: e.target.value})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#8b0000] outline-none text-sm" />
+                        </div>
+                        {/* Ngày bắt đầu */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase ml-1">Ngày bắt đầu</label>
+                          <input type="date" required value={courseForm.startDate} onChange={e => setCourseForm({...courseForm, startDate: e.target.value})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#8b0000] outline-none text-sm" />
+                        </div>
+                        {/* Ngày kết thúc */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase ml-1">Ngày kết thúc</label>
+                          <input type="date" required value={courseForm.endDate} onChange={e => setCourseForm({...courseForm, endDate: e.target.value})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#8b0000] outline-none text-sm" />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-3 mt-6">
+                        {editingCourseId && (
+                          <button type="button" onClick={() => { setQldtCourseSubTab('list'); setEditingCourseId(null); }} className="px-6 py-3 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-xl">Hủy</button>
+                        )}
+                        <button type="submit" disabled={isSubmittingCourse} className="px-10 py-3 bg-[#8b0000] text-white rounded-xl font-bold hover:bg-[#a00000] shadow-lg disabled:opacity-70 flex items-center gap-2">
+                          {isSubmittingCourse ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Calendar className="w-5 h-5" />}
+                          {editingCourseId ? 'Cập nhật' : 'Lưu Lịch học'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm text-left">
+                        <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b">
+                          <tr>
+                            <th className="px-6 py-4">Môn học</th>
+                            <th className="px-6 py-4">Giảng viên</th>
+                            <th className="px-6 py-4">Phòng</th>
+                            <th className="px-6 py-4">Thời gian</th>
+                            <th className="px-6 py-4 text-right">Thao tác</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {allCourses.length > 0 ? allCourses.map((c) => (
+                            <tr key={c.id} className="border-b hover:bg-gray-50">
+                              <td className="px-6 py-4 font-medium text-gray-900">
+                                {c.subjectName} <br/><span className="text-xs text-gray-500">{c.classCode}</span>
+                              </td>
+                              <td className="px-6 py-4">{c.lecturer}</td>
+                              <td className="px-6 py-4">{c.building} - {c.room}</td>
+                              <td className="px-6 py-4">{c.dayOfWeek}, {c.timeRange} <br/><span className="text-xs text-gray-500">{c.startDate} - {c.endDate}</span></td>
+                              <td className="px-6 py-4 text-right">
+                                <button onClick={() => handleEditCourse(c)} className="text-blue-600 hover:underline mr-3">Sửa</button>
+                                <button onClick={() => handleDeleteCourse(c.id)} className="text-red-600 hover:underline">Xóa</button>
+                              </td>
+                            </tr>
+                          )) : (
+                            <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">Chưa có dữ liệu</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : activeTab === 'quan-ly-bao-tri' ? (
+              <div className="space-y-8">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                      <Building2 className="text-blue-600" />
+                      Bảo trì & CSVC
+                    </h2>
+                    <p className="text-gray-500 mt-1">Quản lý các phiếu bảo trì, cập nhật trạng thái hoạt động của phòng.</p>
+                  </div>
+                </div>
+
+                {/* Sub-tabs */}
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => setMaintenanceSubTab('list')}
+                    className={`px-6 py-2 rounded-full font-bold text-sm transition-all ${maintenanceSubTab === 'list' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/10' : 'bg-white text-gray-500 border border-gray-100 hover:bg-gray-50'}`}
+                  >
+                    Danh sách bảo trì
+                  </button>
+                  <button
+                    onClick={() => setMaintenanceSubTab('add')}
+                    className={`px-6 py-2 rounded-full font-bold text-sm transition-all ${maintenanceSubTab === 'add' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/10' : 'bg-white text-gray-500 border border-gray-100 hover:bg-gray-50'}`}
+                  >
+                    Tạo phiếu bảo trì mới
+                  </button>
+                </div>
+
+                {maintenanceSubTab === 'add' ? (
+                  <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-8">
+                    <form onSubmit={handleMaintenanceSubmit} className="space-y-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Tiêu đề */}
+                        <div className="space-y-2 md:col-span-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase ml-1">Tiêu đề / Tên phiếu bảo trì</label>
+                          <input type="text" required placeholder="VD: Sửa chữa điều hòa phòng A2-101" value={maintenanceForm.title} onChange={e => setMaintenanceForm({...maintenanceForm, title: e.target.value})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+                        </div>
+                        {/* Dãy nhà */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase ml-1">Tòa nhà</label>
+                          <select required value={maintenanceForm.building} onChange={e => setMaintenanceForm({...maintenanceForm, building: e.target.value, room: ''})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm">
+                            <option value="">-- Chọn tòa nhà --</option>
+                            {Object.keys(ROOM_DATA).map(b => <option key={b} value={b}>{b}</option>)}
+                          </select>
+                        </div>
+                        {/* Phòng học */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase ml-1">Phòng học / Khu vực</label>
+                          <select required value={maintenanceForm.room} onChange={e => setMaintenanceForm({...maintenanceForm, room: e.target.value})} disabled={!maintenanceForm.building} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm disabled:opacity-50">
+                            <option value="">-- Chọn phòng --</option>
+                            {(ROOM_DATA[maintenanceForm.building] || []).map(r => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                        </div>
+                        {/* Ngày bắt đầu */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase ml-1">Ngày bắt đầu</label>
+                          <input type="date" required value={maintenanceForm.startDate} onChange={e => setMaintenanceForm({...maintenanceForm, startDate: e.target.value})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+                        </div>
+                        {/* Ngày dự kiến hoàn thành */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase ml-1">Ngày dự kiến hoàn thành</label>
+                          <input type="date" required value={maintenanceForm.endDate} min={maintenanceForm.startDate} onChange={e => setMaintenanceForm({...maintenanceForm, endDate: e.target.value})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+                        </div>
+                        {/* Khóa phòng */}
+                        <div className="space-y-2 md:col-span-2 mt-2">
+                          <label className="flex items-center gap-3 p-4 bg-gray-50 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-100 transition-all">
+                            <input type="checkbox" checked={maintenanceForm.khoa_phong} onChange={e => setMaintenanceForm({...maintenanceForm, khoa_phong: e.target.checked})} className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500" />
+                            <div className="flex flex-col">
+                              <span className="text-sm font-bold text-gray-800">Khóa phòng (Tạm ngừng sử dụng)</span>
+                              <span className="text-xs text-gray-500 mt-0.5">Phòng sẽ được hiển thị "Bảo trì" trên sơ đồ giảng đường và không thể đặt mượn.</span>
+                            </div>
+                          </label>
+                        </div>
+                        {/* Mô tả chi tiết */}
+                        <div className="space-y-2 md:col-span-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase ml-1">Mô tả công việc bảo trì</label>
+                          <textarea required rows={4} value={maintenanceForm.description} onChange={e => setMaintenanceForm({...maintenanceForm, description: e.target.value})} placeholder="Nhập chi tiết các hạng mục cần sửa chữa, bảo trì..." className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm resize-none" />
+                        </div>
+                      </div>
+                      <div className="flex justify-end mt-6">
+                        <button type="submit" disabled={isSubmittingMaintenance} className="px-10 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-lg disabled:opacity-70 flex items-center gap-2">
+                          {isSubmittingMaintenance ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Building2 className="w-5 h-5" />}
+                          Tạo phiếu bảo trì
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {allMaintenanceTickets.length > 0 ? (
+                      <div className="grid grid-cols-1 gap-4">
+                        {allMaintenanceTickets.map((ticket) => (
+                          <motion.div
+                            key={ticket.id}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition-all"
+                          >
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                              <div className="space-y-3 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase tracking-wider ${
+                                    ticket.status === 'resolved' ? 'bg-green-50 text-green-600' : 'bg-blue-50 text-blue-600'
+                                  }`}>
+                                    {ticket.status === 'resolved' ? 'Hoàn thành' : 'Đang tiến hành'}
+                                  </span>
+                                  {ticket.khoa_phong && (
+                                    <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-red-100 text-red-600 uppercase tracking-wider border border-red-200 flex items-center gap-1">
+                                      <Lock className="w-3 h-3" /> Đã khóa phòng
+                                    </span>
+                                  )}
+                                  <span className="text-xs text-gray-400">Tạo ngày: {new Date(ticket.createdAt).toLocaleDateString('vi-VN')}</span>
+                                </div>
+
+                                <h4 className="text-lg font-bold text-gray-800">
+                                  {ticket.title}
+                                </h4>
+
+                                <div className="flex flex-wrap gap-4 text-sm text-gray-500">
+                                  <div className="flex items-center gap-1.5">
+                                    <Building2 className="w-4 h-4" />
+                                    <span>{ticket.building} - {ticket.room}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <Calendar className="w-4 h-4" />
+                                    <span>{new Date(ticket.startDate).toLocaleDateString('vi-VN')} đến {new Date(ticket.endDate).toLocaleDateString('vi-VN')}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <User className="w-4 h-4" />
+                                    <span>Người tạo: {ticket.userName}</span>
+                                  </div>
+                                </div>
+                                <p className="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-100 italic">
+                                  "{ticket.description}"
+                                </p>
+                              </div>
+
+                              <div className="flex flex-col items-end gap-2 shrink-0">
+                                {ticket.status !== 'resolved' && (
+                                  <button
+                                    onClick={() => handleUpdateMaintenanceStatus(ticket.id, 'resolved')}
+                                    className="w-full md:w-auto px-6 py-2 bg-green-600 text-white text-sm font-bold rounded-xl hover:bg-green-700 transition-all shadow-lg shadow-green-900/10"
+                                  >
+                                    Đánh dấu Hoàn thành
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </motion.div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-12 text-center">
+                        <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                          <Building2 className="w-8 h-8 text-gray-300" />
+                        </div>
+                        <h3 className="text-lg font-bold text-gray-800">Chưa có phiếu bảo trì nào</h3>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : activeTab === 'quan-ly-su-co' ? (
+              <div className="space-y-8">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                      <AlertTriangle className="text-orange-600" />
+                      Quản lý Sự cố
+                    </h2>
+                    <p className="text-gray-500 mt-1">Tiếp nhận và xử lý các báo cáo, phản ánh sự cố cơ sở vật chất.</p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {allIncidents.length > 0 ? (
+                    <div className="grid grid-cols-1 gap-4">
+                      {allIncidents.map((incident) => {
+                        return (
+                          <motion.div
+                            key={incident.id}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className={`bg-white rounded-2xl shadow-sm border p-6 hover:shadow-md transition-all ${incident.status === 'pending' ? 'border-orange-300 bg-orange-50/10' : 'border-gray-100'}`}
+                            onMouseEnter={() => {
+                              if (incident.status === 'pending') {
+                                handleUpdateIncidentStatus(incident.id, 'received');
+                              }
+                            }}
+                          >
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                              <div className="space-y-3 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase tracking-wider ${
+                                    incident.status === 'resolved' ? 'bg-green-50 text-green-600' :
+                                    incident.status === 'in-progress' ? 'bg-blue-50 text-blue-600' :
+                                    incident.status === 'rejected' ? 'bg-red-50 text-red-600' :
+                                    incident.status === 'received' ? 'bg-orange-50 text-orange-600' :
+                                    'bg-gray-100 text-gray-600'
+                                  }`}>
+                                    {incident.status === 'resolved' ? 'Đã xử lý' :
+                                     incident.status === 'in-progress' ? 'Đang xử lý' :
+                                     incident.status === 'rejected' ? 'Từ chối' :
+                                     incident.status === 'received' ? 'Đã tiếp nhận' : 'Chờ (Mới)'}
+                                  </span>
+                                  <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase tracking-wider bg-gray-100 text-gray-600`}>
+                                    {incident.type}
+                                  </span>
+                                  <span className="text-xs text-gray-400">Ngày gửi: {new Date(incident.createdAt).toLocaleDateString('vi-VN')}</span>
+                                </div>
+
+                                <h4 className="text-lg font-bold text-gray-800">
+                                  {incident.title}
+                                </h4>
+
+                                <div className="flex flex-wrap gap-4 text-sm text-gray-500">
+                                  <div className="flex items-center gap-1.5">
+                                    <User className="w-4 h-4" />
+                                    <span>{incident.userName}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <Building2 className="w-4 h-4" />
+                                    <span>{incident.location}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <AlertTriangle className="w-4 h-4" />
+                                    <span>{incident.equipment}</span>
+                                  </div>
+                                </div>
+                                <p className="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-100 italic">
+                                  "{incident.description}"
+                                </p>
+                              </div>
+
+                              <div className="flex flex-col items-end gap-2 shrink-0">
+                                {incident.status !== 'resolved' && incident.status !== 'rejected' && (
+                                  <>
+                                    {incident.status !== 'in-progress' && (
+                                      <button
+                                        onClick={() => handleUpdateIncidentStatus(incident.id, 'in-progress')}
+                                        className="w-full md:w-auto px-6 py-2 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-900/10"
+                                      >
+                                        Lập phiếu bảo trì
+                                      </button>
+                                    )}
+                                    {incident.status === 'in-progress' && (
+                                      <button
+                                        onClick={() => handleUpdateIncidentStatus(incident.id, 'resolved')}
+                                        className="w-full md:w-auto px-6 py-2 bg-green-600 text-white text-sm font-bold rounded-xl hover:bg-green-700 transition-all shadow-lg shadow-green-900/10"
+                                      >
+                                        Đánh dấu Đã xử lý
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() => handleUpdateIncidentStatus(incident.id, 'rejected')}
+                                      className="w-full md:w-auto px-6 py-2 bg-red-50 text-red-600 text-sm font-bold rounded-xl hover:bg-red-100 transition-all border border-red-200"
+                                    >
+                                      Từ chối
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-12 text-center">
+                      <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <AlertTriangle className="w-8 h-8 text-gray-300" />
+                      </div>
+                      <h3 className="text-lg font-bold text-gray-800">Chưa có sự cố nào được báo cáo</h3>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : activeTab === 'duyet-muon-phong' ? (
+              <div className="space-y-8">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                      <ClipboardList className="text-[#8b0000]" />
+                      Duyệt Mượn phòng
+                    </h2>
+                    <p className="text-gray-500 mt-1">Quản lý và phê duyệt các yêu cầu mượn phòng từ Giảng viên / Sinh viên.</p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {allBookings.length > 0 ? (
+                    <div className="grid grid-cols-1 gap-4">
+                      {allBookings.map((booking) => {
+                        const overlap = booking.status === 'pending' ? checkTimeOverlap(booking.building, booking.room, booking.borrowDate, booking.startTime, booking.returnDate, booking.endTime) : null;
+                        return (
+                          <motion.div
+                            key={booking.id}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition-all"
+                          >
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                              <div className="space-y-3">
+                                <div className="flex items-center gap-2">
+                                  <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase tracking-wider ${
+                                    booking.status === 'approved' ? 'bg-green-50 text-green-600' :
+                                    booking.status === 'rejected' ? 'bg-red-50 text-red-600' :
+                                    'bg-yellow-50 text-yellow-600'
+                                  }`}>
+                                    {booking.status === 'approved' ? 'Đã duyệt' :
+                                     booking.status === 'rejected' ? 'Từ chối' : 'Chờ duyệt'}
+                                  </span>
+                                  {overlap && (
+                                    <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-red-100 text-red-600 uppercase tracking-wider border border-red-200">
+                                      Trùng lịch học
+                                    </span>
+                                  )}
+                                  <span className="text-xs text-gray-400">Ngày đăng ký: {new Date(booking.createdAt).toLocaleDateString('vi-VN')}</span>
+                                </div>
+
+                                <h4 className="text-lg font-bold text-gray-800">
+                                  {booking.building} - Phòng {booking.room}
+                                </h4>
+
+                                <div className="flex flex-wrap gap-4 text-sm text-gray-500">
+                                  <div className="flex items-center gap-1.5">
+                                    <User className="w-4 h-4" />
+                                    <span>{booking.userName} ({booking.studentId})</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <Calendar className="w-4 h-4" />
+                                    <span>{new Date(booking.borrowDate).toLocaleDateString('vi-VN')}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <Clock className="w-4 h-4" />
+                                    <span>{booking.startTime} - {booking.endTime}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <Building2 className="w-4 h-4" />
+                                    <span>{booking.unit}</span>
+                                  </div>
+                                </div>
+                                <p className="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-100 italic">
+                                  "{booking.reason}"
+                                </p>
+                              </div>
+
+                              <div className="flex flex-col items-end gap-2 shrink-0">
+                                {booking.status === 'pending' && (
+                                  <>
+                                    <button
+                                      onClick={() => handleUpdateBookingStatus(booking.id, 'approved')}
+                                      className="w-full md:w-auto px-6 py-2 bg-green-600 text-white text-sm font-bold rounded-xl hover:bg-green-700 transition-all shadow-lg shadow-green-900/10"
+                                    >
+                                      Phê duyệt
+                                    </button>
+                                    <button
+                                      onClick={() => handleUpdateBookingStatus(booking.id, 'rejected')}
+                                      className="w-full md:w-auto px-6 py-2 bg-red-50 text-red-600 text-sm font-bold rounded-xl hover:bg-red-100 transition-all border border-red-200"
+                                    >
+                                      Từ chối
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-12 text-center">
+                      <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <ClipboardList className="w-8 h-8 text-gray-300" />
+                      </div>
+                      <h3 className="text-lg font-bold text-gray-800">Chưa có yêu cầu mượn phòng</h3>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : activeTab === 'trang-chu' ? (
               <>
@@ -2311,7 +3102,7 @@ export default function Dashboard({ onLogout, mockUser }: DashboardProps) {
                 </div>
                 <h3 className="text-xl font-bold text-gray-800">Tính năng đang phát triển</h3>
                 <p className="text-gray-500 mt-2 max-w-md">
-                  Chức năng "{navGroups.flatMap(g => g.items).find(i => i.id === activeTab)?.label}" hiện đang được cập nhật dữ liệu. Vui lòng quay lại sau.
+                  Chức năng "{getNavGroups(mockUser?.role).flatMap(g => g.items).find(i => i.id === activeTab)?.label}" hiện đang được cập nhật dữ liệu. Vui lòng quay lại sau.
                 </p>
                 <button 
                   onClick={() => setActiveTab('trang-chu')}
