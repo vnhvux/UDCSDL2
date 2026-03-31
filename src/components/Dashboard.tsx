@@ -650,38 +650,49 @@ export default function Dashboard({ onLogout, mockUser }: DashboardProps) {
   };
 
   useEffect(() => {
-    if (!auth.currentUser) return;
+    const fetchAllData = () => {
+      setIsLoadingBookings(true);
+      const bookingsRef = collection(db, 'roomBookings');
+      let unsubscribeMyBookings = () => {};
 
-    setIsLoadingBookings(true);
-    const bookingsRef = collection(db, 'roomBookings');
-    const qBookings = query(bookingsRef, where('userId', '==', auth.currentUser.uid));
-    const unsubscribeMyBookings = onSnapshot(qBookings, (snapshot) => {
-      const bookings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setMyBookings(bookings.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
-      setIsLoadingBookings(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'roomBookings');
-      setIsLoadingBookings(false);
-    });
+      if (auth.currentUser) {
+        const qBookings = query(bookingsRef, where('userId', '==', auth.currentUser.uid));
+        unsubscribeMyBookings = onSnapshot(qBookings, (snapshot) => {
+          const bookings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          setMyBookings(bookings.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
+          setIsLoadingBookings(false);
+        }, (error) => {
+          handleFirestoreError(error, OperationType.GET, 'roomBookings');
+          setIsLoadingBookings(false);
+        });
+      } else {
+        setIsLoadingBookings(false);
+      }
 
-    const unsubscribeAllBookings = onSnapshot(bookingsRef, (snapshot) => {
-      const bookings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setAllBookings(bookings.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'roomBookings');
-    });
+      const unsubscribeAllBookings = onSnapshot(bookingsRef, (snapshot) => {
+        const bookings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setAllBookings(bookings.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
+      }, (error) => {
+        handleFirestoreError(error, OperationType.GET, 'roomBookings');
+      });
 
-    setIsLoadingIncidents(true);
-    const incidentsRef = collection(db, 'incidents');
-    const qIncidents = query(incidentsRef, where('userId', '==', auth.currentUser.uid));
-    const unsubscribeMyIncidents = onSnapshot(qIncidents, (snapshot) => {
-      const incidents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setMyIncidents(incidents.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
-      setIsLoadingIncidents(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'incidents');
-      setIsLoadingIncidents(false);
-    });
+      setIsLoadingIncidents(true);
+      const incidentsRef = collection(db, 'incidents');
+      let unsubscribeMyIncidents = () => {};
+
+      if (auth.currentUser) {
+        const qIncidents = query(incidentsRef, where('userId', '==', auth.currentUser.uid));
+        unsubscribeMyIncidents = onSnapshot(qIncidents, (snapshot) => {
+          const incidents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          setMyIncidents(incidents.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
+          setIsLoadingIncidents(false);
+        }, (error) => {
+          handleFirestoreError(error, OperationType.GET, 'incidents');
+          setIsLoadingIncidents(false);
+        });
+      } else {
+        setIsLoadingIncidents(false);
+      }
 
     const unsubscribeAllIncidents = onSnapshot(incidentsRef, (snapshot) => {
       const incidents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -690,21 +701,24 @@ export default function Dashboard({ onLogout, mockUser }: DashboardProps) {
       handleFirestoreError(error, OperationType.GET, 'incidents');
     });
 
-    const maintenanceRef = collection(db, 'maintenanceTickets');
-    const unsubscribeMaintenance = onSnapshot(maintenanceRef, (snapshot) => {
-      const tickets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setAllMaintenanceTickets(tickets.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'maintenanceTickets');
-    });
+      const maintenanceRef = collection(db, 'maintenanceTickets');
+      const unsubscribeMaintenance = onSnapshot(maintenanceRef, (snapshot) => {
+        const tickets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setAllMaintenanceTickets(tickets.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
+      }, (error) => {
+        handleFirestoreError(error, OperationType.GET, 'maintenanceTickets');
+      });
 
-    return () => {
-      unsubscribeMyBookings();
-      unsubscribeAllBookings();
-      unsubscribeMyIncidents();
-      unsubscribeAllIncidents();
-      unsubscribeMaintenance();
+      return () => {
+        unsubscribeMyBookings();
+        unsubscribeAllBookings();
+        unsubscribeMyIncidents();
+        unsubscribeAllIncidents();
+        unsubscribeMaintenance();
+      };
     };
+
+    return fetchAllData();
   }, [auth.currentUser]);
 
   const handleMaintenanceSubmit = async (e: React.FormEvent) => {
@@ -786,12 +800,9 @@ export default function Dashboard({ onLogout, mockUser }: DashboardProps) {
       // Check time overlap
       const [courseStartTime, courseEndTime] = course.timeRange.split(' - ');
 
-      // Simple string comparison works for HH:mm format
-      if (
-        (startTime >= courseStartTime && startTime < courseEndTime) ||
-        (endTime > courseStartTime && endTime <= courseEndTime) ||
-        (startTime <= courseStartTime && endTime >= courseEndTime)
-      ) {
+      // Proper string comparison works for HH:mm format
+      // Formula: (StartA < EndB) and (EndA > StartB)
+      if (startTime < courseEndTime && endTime > courseStartTime) {
         return course; // Conflict found
       }
     }
