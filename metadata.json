@@ -1,0 +1,5 @@
+{
+  "name": "NEU Lecture Hall Management System",
+  "description": "A management system for NEU lecture halls featuring a visual campus map and secure login.",
+  "requestFramePermissions": []
+}

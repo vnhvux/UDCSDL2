@@ -1,0 +1,183 @@
+{
+  "entities": {
+    "Course": {
+      "title": "Course",
+      "description": "Information about a course session in a specific room.",
+      "type": "object",
+      "properties": {
+        "room": {
+          "type": "string",
+          "description": "The room where the course is held (e.g., A2-101)."
+        },
+        "building": {
+          "type": "string",
+          "description": "The building where the room is located (e.g., Giảng đường A2)."
+        },
+        "subjectName": {
+          "type": "string",
+          "description": "The name of the subject."
+        },
+        "subjectCode": {
+          "type": "string",
+          "description": "The code of the subject."
+        },
+        "classCode": {
+          "type": "string",
+          "description": "The class section code (LHP)."
+        },
+        "periods": {
+          "type": "string",
+          "description": "The periods of the class (e.g., 1-2)."
+        },
+        "timeRange": {
+          "type": "string",
+          "description": "The time range of the class (e.g., 06h45 - 09h25)."
+        },
+        "dayOfWeek": {
+          "type": "string",
+          "description": "The day of the week (e.g., Thứ 3)."
+        },
+        "startDate": {
+          "type": "string",
+          "description": "The start date of the course (YYYY-MM-DD)."
+        },
+        "endDate": {
+          "type": "string",
+          "description": "The end date of the course (YYYY-MM-DD)."
+        },
+        "lecturer": {
+          "type": "string",
+          "description": "The name of the lecturer."
+        }
+      },
+      "required": ["room", "building", "subjectName", "subjectCode", "classCode", "startDate", "endDate"]
+    },
+    "RoomBooking": {
+      "title": "RoomBooking",
+      "description": "Information about a room booking request.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The UID of the user who made the booking."
+        },
+        "userName": {
+          "type": "string",
+          "description": "The name of the borrower."
+        },
+        "studentId": {
+          "type": "string",
+          "description": "The student ID of the borrower."
+        },
+        "lecturerId": {
+          "type": "string",
+          "description": "The lecturer ID (0 if student)."
+        },
+        "borrowDate": {
+          "type": "string",
+          "description": "The date of borrowing (YYYY-MM-DD)."
+        },
+        "returnDate": {
+          "type": "string",
+          "description": "The date of returning (YYYY-MM-DD)."
+        },
+        "startTime": {
+          "type": "string",
+          "description": "The start time (HH:mm)."
+        },
+        "endTime": {
+          "type": "string",
+          "description": "The end time (HH:mm)."
+        },
+        "building": {
+          "type": "string",
+          "description": "The building name."
+        },
+        "room": {
+          "type": "string",
+          "description": "The room name."
+        },
+        "reason": {
+          "type": "string",
+          "description": "The reason or purpose for borrowing."
+        },
+        "unit": {
+          "type": "string",
+          "description": "The borrowing unit (department/club)."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "description": "The status of the booking request."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The timestamp when the booking was created."
+        }
+      },
+      "required": ["userId", "userName", "borrowDate", "startTime", "endTime", "building", "room", "reason", "unit", "status"]
+    },
+    "Incident": {
+      "title": "Incident",
+      "description": "Information about an incident report.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The UID of the user who reported the incident."
+        },
+        "userName": {
+          "type": "string",
+          "description": "The name of the reporter."
+        },
+        "title": {
+          "type": "string",
+          "description": "The title or brief summary of the incident."
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed description of the incident."
+        },
+        "location": {
+          "type": "string",
+          "description": "The location where the incident occurred (e.g., building/room)."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["Sự cố phòng học", "Sự cố Cơ sở vật chất"],
+          "description": "The type of the incident."
+        },
+        "equipment": {
+          "type": "string",
+          "description": "The specific equipment with the issue."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "in-progress", "resolved"],
+          "description": "The status of the incident report."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The timestamp when the incident was reported."
+        }
+      },
+      "required": ["userId", "userName", "title", "description", "location", "type", "equipment", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/courses": {
+      "schema": "Course",
+      "description": "Collection of all course sessions."
+    },
+    "/roomBookings": {
+      "schema": "RoomBooking",
+      "description": "Collection of all room booking requests."
+    },
+    "/incidents": {
+      "schema": "Incident",
+      "description": "Collection of all incident reports."
+    }
+  }
+}

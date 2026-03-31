@@ -1,0 +1,117 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: courses
+    // Document ID: auto-generated
+    // Fields:
+    //   - room: string (required)
+    //   - building: string (required)
+    //   - subjectName: string (required)
+    //   - subjectCode: string (required)
+    //   - classCode: string (required)
+    //   - periods: string
+    //   - timeRange: string
+    //   - dayOfWeek: string
+    //   - startDate: string (required, YYYY-MM-DD)
+    //   - endDate: string (required, YYYY-MM-DD)
+    //   - lecturer: string
+    //
+    // Collection: users
+    // Document ID: userId
+    // Fields:
+    //   - role: string (admin/user)
+    //   - email: string
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (
+          ('email' in request.auth.token && 'email_verified' in request.auth.token && request.auth.token.email == "o3bs.vinq310435@gmail.com" && request.auth.token.email_verified == true) ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+        );
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Validation Functions
+    function isValidCourse(data) {
+      return data.keys().hasAll(['room', 'building', 'subjectName', 'subjectCode', 'classCode', 'startDate', 'endDate']) &&
+             data.room is string && data.room.size() > 0 &&
+             data.building is string && data.building.size() > 0 &&
+             data.subjectName is string && data.subjectName.size() > 0 &&
+             data.subjectCode is string && data.subjectCode.size() > 0 &&
+             data.classCode is string && data.classCode.size() > 0 &&
+             data.startDate is string && data.startDate.matches("^\\d{4}-\\d{2}-\\d{2}$") &&
+             data.endDate is string && data.endDate.matches("^\\d{4}-\\d{2}-\\d{2}$");
+    }
+
+    function isValidRoomBooking(data) {
+      return data.keys().hasAll(['userId', 'userName', 'borrowDate', 'returnDate', 'startTime', 'endTime', 'building', 'room', 'reason', 'unit', 'status', 'studentId', 'lecturerId', 'createdAt']) &&
+             data.userId == request.auth.uid &&
+             data.userName is string && data.userName.size() > 0 &&
+             data.studentId is string &&
+             data.lecturerId is string &&
+             data.borrowDate is string && data.borrowDate.matches("^\\d{4}-\\d{2}-\\d{2}$") &&
+             data.returnDate is string && data.returnDate.matches("^\\d{4}-\\d{2}-\\d{2}$") &&
+             (data.returnDate > data.borrowDate || (data.returnDate == data.borrowDate && data.endTime >= data.startTime)) &&
+             data.startTime is string && data.startTime.matches("^\\d{2}:\\d{2}$") &&
+             data.endTime is string && data.endTime.matches("^\\d{2}:\\d{2}$") &&
+             data.building is string && data.building.size() > 0 &&
+             data.room is string && data.room.size() > 0 &&
+             data.reason is string && data.reason.size() > 0 &&
+             data.unit is string && data.unit.size() > 0 &&
+             data.status in ['pending', 'approved', 'rejected'] &&
+             data.createdAt is string;
+    }
+
+    function isValidIncident(data) {
+      return data.keys().hasAll(['userId', 'userName', 'title', 'description', 'location', 'type', 'equipment', 'status', 'createdAt']) &&
+             data.userId == request.auth.uid &&
+             data.userName is string && data.userName.size() > 0 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.description is string && data.description.size() > 0 && data.description.size() <= 2000 &&
+             data.location is string && data.location.size() > 0 && data.location.size() <= 100 &&
+             data.type in ['Sự cố phòng học', 'Sự cố Cơ sở vật chất'] &&
+             data.equipment is string && data.equipment.size() > 0 && data.equipment.size() <= 100 &&
+             data.status in ['pending', 'in-progress', 'resolved'] &&
+             data.createdAt is string;
+    }
+
+    // Rules
+    match /courses/{courseId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && isValidCourse(request.resource.data);
+    }
+
+    match /roomBookings/{bookingId} {
+      allow read: if isAuthenticated() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() && isValidRoomBooking(request.resource.data) && request.resource.data.status == 'pending';
+      allow update: if isAuthenticated() && (isAdmin() || (isOwner(resource.data.userId) && isValidRoomBooking(request.resource.data) && request.resource.data.status == resource.data.status));
+      allow delete: if isAuthenticated() && (isAdmin() || (isOwner(resource.data.userId) && resource.data.status == 'pending'));
+    }
+
+    match /incidents/{incidentId} {
+      allow read: if isAuthenticated() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() && isValidIncident(request.resource.data) && request.resource.data.status == 'pending';
+      allow update: if isAuthenticated() && (isAdmin() || (isOwner(resource.data.userId) && isValidIncident(request.resource.data) && request.resource.data.status == resource.data.status));
+      allow delete: if isAuthenticated() && (isAdmin() || (isOwner(resource.data.userId) && resource.data.status == 'pending'));
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isAdmin();
+    }
+  }
+}
